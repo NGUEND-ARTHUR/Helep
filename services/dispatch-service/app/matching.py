@@ -1,6 +1,6 @@
 """Pattern: Strategy. Plug-in matching algorithms for choosing a responder.
 
-Switch via env MATCHER=nearest|credibility.
+Switch via env MATCHER=nearest|credibility|roundrobin.
 """
 from __future__ import annotations
 import math
@@ -54,8 +54,31 @@ class CredibilityWeightedMatcher:
         return {"id": best["id"], "score": best_score}
 
 
+class RoundRobinMatcher:
+    """Rotate through all free units regardless of distance.
+
+    Useful when responders are evenly spread and we want fair workload
+    distribution instead of always picking whoever is closest to the hotspot.
+    A class-level counter persists for the lifetime of the process.
+    """
+
+    _turn: int = 0   # shared across all calls within one pod
+
+    def pick(self, victim_lat: float, victim_lon: float, responders) -> dict | None:
+        pool = list(responders)
+        if not pool:
+            return None
+        chosen = pool[RoundRobinMatcher._turn % len(pool)]
+        RoundRobinMatcher._turn += 1
+        dist = haversine_m(victim_lat, victim_lon, chosen["lat"], chosen["lon"])
+        return {"id": chosen["id"], "distance_m": round(dist, 2)}
+
+
 def matcher() -> Matcher:
-    name = os.getenv("MATCHER", "nearest").lower()
-    if name == "credibility":
+    """Factory — reads MATCHER env-var each call so it can be changed at runtime."""
+    choice = os.getenv("MATCHER", "nearest").lower()
+    if choice == "credibility":
         return CredibilityWeightedMatcher()
+    if choice == "roundrobin":
+        return RoundRobinMatcher()
     return NearestMatcher()

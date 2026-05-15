@@ -1,0 +1,62 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "svc.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "svc.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicas }}
+  selector:
+    matchLabels: {{- include "svc.selector" . | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "svc.selector" . | nindent 8 }}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8003"
+        prometheus.io/path: "/metrics"
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
+      containers:
+        - name: dispatch-service
+          image: {{ .Values.image | quote }}
+          imagePullPolicy: {{ .Values.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8003
+          env:
+            - name: KAFKA_BOOTSTRAP
+              valueFrom:
+                configMapKeyRef:
+                  name: helep-env
+                  key: KAFKA_BOOTSTRAP
+            - name: DB_PATH
+              value: "/data/dispatch-service.db"
+            - name: SERVICE_PORT
+              value: "8003"
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: helep-secrets
+                  key: JWT_SECRET
+          livenessProbe:
+            httpGet: { path: /healthz, port: 8003 }
+            initialDelaySeconds: 20
+            periodSeconds: 15
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: { path: /readyz, port: 8003 }
+            initialDelaySeconds: 25
+            periodSeconds: 10
+            failureThreshold: 3
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "svc.fullname" . }}-pvc

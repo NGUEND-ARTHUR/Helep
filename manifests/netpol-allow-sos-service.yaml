@@ -1,0 +1,34 @@
+# Allow inbound HTTP on port 8002 to sos-service from:
+#   nginx ingress controller, prometheus scraper, and other helep pods
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-inbound-sos-service
+  namespace: helep
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: sos-service
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - { port: 8002, protocol: TCP }
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - { port: 8002, protocol: TCP }
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/part-of: helep
+      ports:
+        - { port: 8002, protocol: TCP }

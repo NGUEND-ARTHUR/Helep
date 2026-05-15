@@ -52,8 +52,20 @@ def insert_user(uid: str, phone: str, pwd_hash: str, role: str) -> None:
 
 
 def find_by_phone(phone: str) -> Optional[sqlite3.Row]:
+    """Write-side lookup — used during signup duplicate check and login."""
     with conn() as c:
         return c.execute("SELECT * FROM users WHERE phone = ?", (phone,)).fetchone()
+
+
+def find_by_id(uid: str) -> Optional[sqlite3.Row]:
+    """Read-side projection — used by GET /me (CQRS query path).
+
+    Keeping this separate from find_by_phone means the two paths can evolve
+    independently. If /me ever needs a cache layer, I add it here without
+    touching the auth path at all.
+    """
+    with conn() as c:
+        return c.execute("SELECT * FROM users WHERE id = ?", (uid,)).fetchone()
 
 
 def add_contact(uid: str, name: str, phone: str) -> None:

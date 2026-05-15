@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: helep-dash-provider
+data:
+  helep-provider.yaml: |
+    apiVersion: 1
+    providers:
+      - name: 'Helep'
+        orgId: 1
+        folder: ''
+        type: file
+        disableDeletion: false
+        options:
+          path: /var/lib/grafana/dashboards

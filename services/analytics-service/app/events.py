@@ -1,19 +1,13 @@
-"""Apache Kafka producer + consumer helpers (aiokafka).
+"""Kafka helpers shared across all HELEP services.
 
-Patterns:
-  - Pub/Sub (Kafka topics + consumer groups)
-  - Outbox-lite (publish + db-write live in same async block in main.py)
-  - Circuit breaker stub (TODO: student completes)
-
-Partition keying:
-  Every saga-critical publish should pass key=<incident_id> (or <user_id>).
-  Same-key events land on the same partition, preserving ordering and ensuring
-  the "no double dispatch" invariant holds even with multi-replica consumers
-  (one partition is owned by one consumer at a time inside a group).
+Pub/Sub  : topics + consumer groups, manual offset commit (at-least-once)
+Outbox   : db write and publish live in the same async block in main.py
+Circuit  : CircuitBreaker guards every send so a dead broker can't freeze the API
 """
 from __future__ import annotations
 import json
 import os
+import time
 from typing import Awaitable, Callable, Iterable
 
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
@@ -45,7 +39,7 @@ async def stop_producer() -> None:
 
 
 async def health() -> bool:
-    """Liveness ping for /readyz — verify broker reachable + metadata fetch works."""
+    """Try to reach the broker. Used by /readyz."""
     try:
         p = await producer()
         await p.client.fetch_all_metadata()
@@ -54,64 +48,114 @@ async def health() -> bool:
         return False
 
 
-# ---- Circuit breaker stub (student to complete) ----
-class CircuitBreaker:
-    def __init__(self, fail_threshold: int = 5, reset_after_s: float = 10.0):
-        self.fail_threshold = fail_threshold
-        self.reset_after_s = reset_after_s
-        self.fails = 0
-        self.opened_at: float | None = None
+# ---------------------------------------------------------------------------
+# Circuit Breaker
+# Three states: CLOSED (normal) -> OPEN (broker down, fast-fail all sends)
+#               -> HALF_OPEN (cooling done, try one probe) -> CLOSED or OPEN
+# ---------------------------------------------------------------------------
 
-    def allow(self) -> bool:
-        # TODO (student): implement open/half-open/closed state machine
+class CircuitBreaker:
+    """Stops the service from hammering a broken Kafka broker.
+
+    When too many publishes fail in a row we flip OPEN and immediately
+    raise on any further publish() call. After reset_after_s seconds we
+    allow a single probe; success closes it again, failure restarts the timer.
+    """
+
+    CLOSED    = "CLOSED"
+    OPEN      = "OPEN"
+    HALF_OPEN = "HALF_OPEN"
+
+    def __init__(self, fail_max: int = 5, reset_after_s: float = 10.0) -> None:
+        self._state      = self.CLOSED
+        self._failures   = 0
+        self._opened_at: float | None = None
+        self._fail_max   = fail_max
+        self._reset_s    = reset_after_s
+
+    # -- read-only state so tests can inspect it
+    @property
+    def state(self) -> str:
+        return self._state
+
+    def _try_reset(self) -> None:
+        """Move OPEN -> HALF_OPEN once the cooling window has elapsed."""
+        if self._opened_at is not None:
+            if (time.monotonic() - self._opened_at) >= self._reset_s:
+                self._state = self.HALF_OPEN
+
+    def allow_request(self) -> bool:
+        """Return True when the caller should go ahead with the operation."""
+        if self._state == self.CLOSED:
+            return True
+        if self._state == self.OPEN:
+            self._try_reset()
+            # still open after reset attempt means cooling not done yet
+            return self._state == self.HALF_OPEN
+        # HALF_OPEN: one probe is allowed through
         return True
 
-    def record_success(self) -> None:
-        self.fails = 0
+    def on_success(self) -> None:
+        self._failures  = 0
+        self._state     = self.CLOSED
+        self._opened_at = None
 
-    def record_failure(self) -> None:
-        self.fails += 1
+    def on_failure(self) -> None:
+        self._failures += 1
+        if self._state == self.HALF_OPEN:
+            # probe failed -> stay broken, restart timer
+            self._state     = self.OPEN
+            self._opened_at = time.monotonic()
+        elif self._failures >= self._fail_max:
+            self._state     = self.OPEN
+            self._opened_at = time.monotonic()
 
 
 _breaker = CircuitBreaker()
 
 
-async def publish(topic: str, event: dict, key: str | None = None) -> None:
-    """Outbox-lite: caller should db-write THEN await publish() in same async block."""
-    if not _breaker.allow():
-        raise RuntimeError(f"circuit-open: {topic}")
+async def publish(topic: str, payload: dict, key: str | None = None) -> None:
+    """Send one message. Raises if circuit is open or broker rejects."""
+    if not _breaker.allow_request():
+        raise RuntimeError(
+            f"kafka circuit is OPEN — skipping publish to '{topic}'"
+        )
     try:
         p = await producer()
-        await p.send_and_wait(topic, value=event, key=key)
-        _breaker.record_success()
+        await p.send_and_wait(topic, value=payload, key=key)
+        _breaker.on_success()
     except Exception:
-        _breaker.record_failure()
+        _breaker.on_failure()
         raise
 
 
 Handler = Callable[[dict], Awaitable[None]]
 
 
-async def consume(topics: Iterable[str], group: str, handler: Handler) -> None:
-    """Consumer-group reader. Manual commit only on successful handler (at-least-once)."""
+async def consume(
+    topics: Iterable[str],
+    group_id: str,
+    handler: Handler,
+) -> None:
+    """Read forever. Offset only advances after handler returns without error."""
     consumer = AIOKafkaConsumer(
         *topics,
         bootstrap_servers=KAFKA_BOOTSTRAP,
-        group_id=group,
+        group_id=group_id,
         enable_auto_commit=False,
         auto_offset_reset="earliest",
-        value_deserializer=lambda v: json.loads(v.decode()),
+        value_deserializer=lambda raw: json.loads(raw.decode()),
     )
     await consumer.start()
     try:
         async for msg in consumer:
-            payload = msg.value
-            payload["_stream"] = msg.topic  # preserved name for back-compat with handlers
+            data = msg.value
+            data["_stream"] = msg.topic
             try:
-                await handler(payload)
+                await handler(data)
                 await consumer.commit()
             except Exception:
-                # leave un-committed → re-delivered on next read (at-least-once)
+                # leave offset uncommitted -> message re-delivered on restart
                 pass
     finally:
         await consumer.stop()

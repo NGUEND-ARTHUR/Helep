@@ -1,0 +1,94 @@
+# 7 topics, one per event type.
+# partitions: 3 so up to 3 consumer pods can work in parallel.
+# Messages keyed by incident_id so all events for one SOS land on the same partition.
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: user-registered
+  namespace: kafka
+  labels: { strimzi.io/cluster: helep-kafka }
+spec:
+  partitions: 3
+  replicas: 1
+  config:
+    retention.ms: "86400000"
+    cleanup.policy: delete
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: sos-triggered
+  namespace: kafka
+  labels: { strimzi.io/cluster: helep-kafka }
+spec:
+  partitions: 3
+  replicas: 1
+  config:
+    retention.ms: "86400000"
+    cleanup.policy: delete
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: sos-cancelled
+  namespace: kafka
+  labels: { strimzi.io/cluster: helep-kafka }
+spec:
+  partitions: 3
+  replicas: 1
+  config:
+    retention.ms: "86400000"
+    cleanup.policy: delete
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: responder-assigned
+  namespace: kafka
+  labels: { strimzi.io/cluster: helep-kafka }
+spec:
+  partitions: 3
+  replicas: 1
+  config:
+    retention.ms: "86400000"
+    cleanup.policy: delete
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: responder-confirmed
+  namespace: kafka
+  labels: { strimzi.io/cluster: helep-kafka }
+spec:
+  partitions: 3
+  replicas: 1
+  config:
+    retention.ms: "86400000"
+    cleanup.policy: delete
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: safety-zone-entered
+  namespace: kafka
+  labels: { strimzi.io/cluster: helep-kafka }
+spec:
+  partitions: 3
+  replicas: 1
+  config:
+    retention.ms: "86400000"
+    cleanup.policy: delete
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: notification-sent
+  namespace: kafka
+  labels: { strimzi.io/cluster: helep-kafka }
+spec:
+  partitions: 3
+  replicas: 1
+  config:
+    retention.ms: "86400000"
+    cleanup.policy: delete

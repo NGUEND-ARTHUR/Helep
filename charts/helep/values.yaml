@@ -1,0 +1,73 @@
+# Root values file.
+# Every service reads from the global block first, then its own block.
+# Override at deploy time:
+#   helm upgrade --install helep ./charts/helep -n helep \
+#       --set global.tag=abc1234 \
+#       --set global.jwtSecret=<secret>
+
+global:
+  registry: "docker.io/yourdockerhubuser"
+  tag: "0.1.0"
+  pullPolicy: IfNotPresent
+  # bootstrap address created by strimzi in namespace 'kafka'
+  kafkaAddr: "helep-kafka-kafka-bootstrap.kafka.svc.cluster.local:9092"
+  # never hardcode the real secret here -- pass it via --set or external-secrets
+  jwtSecret: "CHANGE_BEFORE_DEPLOY"
+
+ingress:
+  enabled: true
+  class: "nginx"
+  host: "helep.local"
+  tls: false
+
+# per-service knobs -- override in values-prod.yaml for production sizing
+userSvc:
+  replicas: 1
+  minReplicas: 1
+  maxReplicas: 3
+  cpuLimit: "400m"
+  memLimit: "256Mi"
+  cpuRequest: "80m"
+  memRequest: "128Mi"
+  pvcSize: "1Gi"
+
+sosSvc:
+  replicas: 1
+  minReplicas: 1
+  maxReplicas: 3
+  cpuLimit: "400m"
+  memLimit: "256Mi"
+  cpuRequest: "80m"
+  memRequest: "128Mi"
+  pvcSize: "1Gi"
+
+dispatchSvc:
+  replicas: 1
+  minReplicas: 1
+  maxReplicas: 3
+  matcher: "nearest"
+  cpuLimit: "600m"
+  memLimit: "256Mi"
+  cpuRequest: "120m"
+  memRequest: "128Mi"
+  pvcSize: "1Gi"
+
+notifSvc:
+  replicas: 1
+  minReplicas: 1
+  maxReplicas: 3
+  cpuLimit: "400m"
+  memLimit: "256Mi"
+  cpuRequest: "80m"
+  memRequest: "128Mi"
+  pvcSize: "1Gi"
+
+analyticsSvc:
+  replicas: 1
+  minReplicas: 1
+  maxReplicas: 2
+  cpuLimit: "400m"
+  memLimit: "256Mi"
+  cpuRequest: "80m"
+  memRequest: "128Mi"
+  pvcSize: "2Gi"

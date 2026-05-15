@@ -1,66 +1,106 @@
-# HELEP — Capstone Source Tree
+# HELEP — Submission
 
-This folder is what a **student** receives at the start of the 24-hour exercise.
+**Hybrid Emergency & Localization Emergency Platform**
+SEN3244 Software Architecture — May 2026
+
+---
+
+## Folder layout
 
 ```
-helep/
-├── Lecture Notes Software Architecture Orchestration with K8s Mini Project Specifications.pdf   ← read this first
-├── architecture-overview.md                   ← lecturer reference (not given to student)
-├── design-process-template.md                 ← Part G template (you fill it in)
-├── patterns-template.md                       ← Part H template (you fill it in)
-├── docker-compose.dev.yml                     ← dev-only smoke test, NOT graded
-└── services/
-    ├── user-service/         (port 8001, FastAPI)
-    ├── sos-service/          (port 8002)
-    ├── dispatch-service/     (port 8003)
-    ├── notification-service/ (port 8004)
-    └── analytics-service/    (port 8005)
+helep-final/
+├── services/
+│   ├── user-service/        Dockerfile  app/  requirements.txt
+│   ├── sos-service/         Dockerfile  app/  requirements.txt
+│   ├── dispatch-service/    Dockerfile  app/  requirements.txt
+│   ├── notification-service/ Dockerfile  app/  requirements.txt
+│   └── analytics-service/   Dockerfile  app/  requirements.txt
+├── charts/helep/
+│   ├── Chart.yaml  values.yaml
+│   ├── templates/   configmap  secret  ingress
+│   └── charts/      5 sub-charts, each with Deployment/Service/HPA/PVC
+├── manifests/
+│   ├── namespace.yaml  storageclass.yaml
+│   ├── kafka-cluster.yaml      Strimzi Kafka CR + PodDisruptionBudget
+│   ├── kafka-topics.yaml       7 KafkaTopic CRDs
+│   ├── netpol-deny-all.yaml
+│   ├── netpol-allow-dns.yaml
+│   ├── netpol-allow-kafka.yaml
+│   ├── netpol-allow-<svc>.yaml  (one per service)
+│   ├── prometheus-values.yaml
+│   └── grafana-dashboard-cm.yaml
+├── ci/
+│   └── Jenkinsfile
+├── dashboards/
+│   └── helep-overview.json
+├── design.pdf
+├── patterns.pdf
+└── docker-compose.dev.yml
 ```
 
-## What's wired in the starter code
+## Code changes to starter
 
-- HTTP server + per-service ports
-- `/healthz`, `/readyz`, `/metrics` on every service
-- Structured JSON logs (`structlog`)
-- Env-var config (`KAFKA_BOOTSTRAP`, `DB_PATH`, `JWT_SECRET`, `SERVICE_PORT`, `MATCHER`)
-- SQLite per service + auto-migration on startup
-- Apache Kafka producer + consumer-group reader via `aiokafka` (`app/events.py`)
-- Saga skeleton across `sos` → `dispatch` → `notification`
-- Strategy pattern for responder matching (`dispatch-service/app/matching.py`)
-- Circuit-breaker class stub — you must complete the state machine (see `patterns-template.md` Part A.6)
+| File | What changed |
+|------|-------------|
+| `services/*/app/events.py` | CircuitBreaker class completed (CLOSED/OPEN/HALF_OPEN) |
+| `services/dispatch-service/app/matching.py` | RoundRobinMatcher added + factory updated |
 
-## What's NOT in the starter (this is your work)
-
-- Dockerfile per service
-- Helm umbrella chart + sub-charts
-- Kubernetes manifests (Deployment, Service, Ingress, ConfigMap, Secret, HPA, PVC, NetworkPolicy)
-- Kafka cluster via Strimzi Operator (Kafka CR + KafkaTopic CRDs)
-- Prometheus + Grafana stack
-- CI/CD pipeline
-- The two PDFs (design + patterns)
-- Demo video
-
-## Quick local smoke test (dev only)
+## Local dev
 
 ```bash
 docker compose -f docker-compose.dev.yml up --build
-# in another shell:
-curl -X POST localhost:8001/signup -H 'content-type: application/json' \
-     -d '{"phone":"+237600000001","password":"hunter22","role":"citizen"}'
-# -> { "id": "...", "token": "eyJ..." }
-TOKEN=...
-curl -X POST localhost:8002/sos -H "authorization: Bearer $TOKEN" \
-     -H 'content-type: application/json' \
-     -d '{"lat":4.0500,"lon":9.7700,"mode":"online"}'
-# tail notification-service logs to see the simulated SMS line:
+
+# register
+curl -X POST localhost:8001/signup \
+  -H 'content-type: application/json' \
+  -d '{"phone":"+237600000001","password":"pass123","role":"citizen"}'
+
+# trigger SOS
+curl -X POST localhost:8002/sos \
+  -H "authorization: Bearer <TOKEN>" \
+  -H 'content-type: application/json' \
+  -d '{"lat":4.05,"lon":9.77,"mode":"online"}'
+
+# watch the saga
 docker compose -f docker-compose.dev.yml logs -f notification-service
-# police stats:
 curl localhost:8005/stats/events
-curl localhost:8005/stats/zones
 ```
 
-If the saga works in compose, the K8s version is just packaging.
+## Kubernetes deploy
 
-## Submission
+```bash
+kubectl create namespace kafka
+kubectl create namespace helep
+kubectl create namespace observability
+kubectl apply -f manifests/namespace.yaml
 
-See **Section "Submission"** of the brief. https://forms.gle/9QCvLTMV3CSZpxPc8.
+# strimzi
+helm install strimzi oci://quay.io/strimzi-helm/strimzi-kafka-operator \
+  -n kafka --set watchNamespaces="{kafka}"
+
+# kafka
+kubectl apply -f manifests/kafka-cluster.yaml
+kubectl apply -f manifests/kafka-topics.yaml
+
+# network
+kubectl apply -f manifests/netpol-deny-all.yaml
+kubectl apply -f manifests/netpol-allow-dns.yaml
+kubectl apply -f manifests/netpol-allow-kafka.yaml
+kubectl apply -f manifests/netpol-allow-user-service.yaml
+kubectl apply -f manifests/netpol-allow-sos-service.yaml
+kubectl apply -f manifests/netpol-allow-dispatch-service.yaml
+kubectl apply -f manifests/netpol-allow-notification-service.yaml
+kubectl apply -f manifests/netpol-allow-analytics-service.yaml
+
+# services
+helm upgrade --install helep ./charts/helep -n helep \
+  --set global.tag=0.1.0 \
+  --set global.jwtSecret=$(openssl rand -base64 32)
+
+# monitoring
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm upgrade --install prom prometheus-community/kube-prometheus-stack \
+  -n observability -f manifests/prometheus-values.yaml
+```
+
+Submission form: https://forms.gle/9QCvLTMV3CSZpxPc8

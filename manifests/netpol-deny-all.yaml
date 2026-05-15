@@ -1,0 +1,10 @@
+# Block everything by default. Individual allow rules below open only
+# what each service actually needs.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: deny-all
+  namespace: helep
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
