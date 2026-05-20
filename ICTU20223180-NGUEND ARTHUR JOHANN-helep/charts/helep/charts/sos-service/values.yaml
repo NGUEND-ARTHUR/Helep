@@ -1,0 +1,12 @@
+replicas: 1
+port: 8002
+image: "docker.io/yourdockerhubuser/helep-sos-service:0.1.0"
+pullPolicy: IfNotPresent
+pvcSize: "1Gi"
+storageClass: "standard"
+minReplicas: 1
+maxReplicas: 3
+cpuScaleAt: 70
+resources:
+  requests: { cpu: "80m",  memory: "128Mi" }
+  limits:   { cpu: "400m", memory: "256Mi" }

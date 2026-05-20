@@ -1,0 +1,12 @@
+# We use the 'standard' StorageClass that ships with Minikube and Kind.
+# On a cloud cluster (GKE, EKS, AKS) the equivalent is pd-standard / gp2 / default.
+# ReadWriteOnce is correct here because each service has exactly one SQLite writer at a time.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: standard
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "true"
+provisioner: docker.io/hostpath
+reclaimPolicy: Retain
+volumeBindingMode: Immediate

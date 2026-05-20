@@ -1,0 +1,8 @@
+apiVersion: v2
+name: helep
+description: Umbrella chart for the HELEP emergency platform.
+  Bundles all five microservices. Kafka lives separately in namespace 'kafka'
+  under the Strimzi operator.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

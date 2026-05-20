@@ -1,0 +1,200 @@
+// HELEP deployment pipeline
+// Stages: lint -> build images -> trivy scan -> push -> helm deploy -> smoke test -> prod gate
+
+pipeline {
+
+    agent any
+
+    environment {
+        REGISTRY      = "docker.io"
+        DOCKER_USER   = credentials('dockerhub-username')
+        DOCKER_PASS   = credentials('dockerhub-password')
+        IMAGE_BASE     = "${REGISTRY}/${DOCKER_USER}/helep"
+        SHORT_SHA      = "${GIT_COMMIT[0..7]}"
+        NAMESPACE      = "helep"
+        JWT_SECRET_VAL = credentials('helep-jwt-secret')
+        KAFKA_ADDR     = "helep-kafka-kafka-bootstrap.kafka.svc.cluster.local:9092"
+    }
+
+    options {
+        timeout(time: 40, unit: 'MINUTES')
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+        disableConcurrentBuilds()
+    }
+
+    stages {
+
+        stage('Lint') {
+            steps {
+                sh '''
+                    pip install --quiet ruff
+                    echo "checking services..."
+                    for svc in user-service sos-service dispatch-service \
+                                notification-service analytics-service; do
+                        ruff check services/$svc/app/ --select E,W,F
+                    done
+                    echo "lint ok"
+                '''
+            }
+        }
+
+        stage('Build') {
+            steps {
+                sh '''
+                    docker login -u "$DOCKER_USER" -p "$DOCKER_PASS" "$REGISTRY"
+                    for svc in user-service sos-service dispatch-service \
+                                notification-service analytics-service; do
+                        TAG="${IMAGE_BASE}-${svc}:${SHORT_SHA}"
+                        echo "building $TAG"
+                        docker build -t "$TAG" -t "${IMAGE_BASE}-${svc}:latest" \
+                            -f "services/$svc/Dockerfile" "services/$svc"
+                    done
+                '''
+            }
+        }
+
+        stage('Security Scan') {
+            // fail the build if any HIGH or CRITICAL CVE is found
+            steps {
+                sh '''
+                    which trivy || \
+                        curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+                        | sh -s -- -b /usr/local/bin
+
+                    PASS=true
+                    for svc in user-service sos-service dispatch-service \
+                                notification-service analytics-service; do
+                        TAG="${IMAGE_BASE}-${svc}:${SHORT_SHA}"
+                        trivy image --exit-code 1 --severity HIGH,CRITICAL \
+                            --no-progress "$TAG" || PASS=false
+                    done
+                    $PASS || { echo "Trivy found critical vulnerabilities"; exit 1; }
+                '''
+            }
+        }
+
+        stage('Push') {
+            steps {
+                sh '''
+                    for svc in user-service sos-service dispatch-service \
+                                notification-service analytics-service; do
+                        docker push "${IMAGE_BASE}-${svc}:${SHORT_SHA}"
+                        docker push "${IMAGE_BASE}-${svc}:latest"
+                    done
+                '''
+            }
+        }
+
+        stage('Deploy') {
+            steps {
+                withKubeConfig([credentialsId: 'kubeconfig-staging']) {
+                    sh """
+                        kubectl apply -f manifests/namespace.yaml
+                        kubectl apply -f manifests/netpol-deny-all.yaml
+                        kubectl apply -f manifests/netpol-allow-dns.yaml
+                        kubectl apply -f manifests/netpol-allow-kafka.yaml
+                        for svc in user-service sos-service dispatch-service \
+                                    notification-service analytics-service; do
+                            kubectl apply -f manifests/netpol-allow-\${svc}.yaml
+                        done
+                        kubectl apply -f manifests/kafka-topics.yaml
+
+                        helm upgrade --install helep ./charts/helep \\
+                            -n ${NAMESPACE} --create-namespace \\
+                            --set global.tag=${SHORT_SHA} \\
+                            --set global.registry=${IMAGE_BASE} \\
+                            --set global.jwtSecret=${JWT_SECRET_VAL} \\
+                            --set global.kafkaAddr=${KAFKA_ADDR} \\
+                            --atomic --timeout 5m --wait
+                    """
+                }
+            }
+        }
+
+        stage('Smoke Test') {
+            steps {
+                withKubeConfig([credentialsId: 'kubeconfig-staging']) {
+                    sh '''
+                        kubectl rollout status deployment -n helep --timeout=90s
+
+                        # hit /healthz on every service through a quick port-forward
+                        for pair in user-service:8001 sos-service:8002 \
+                                    dispatch-service:8003 notification-service:8004 \
+                                    analytics-service:8005; do
+                            SVC="${pair%%:*}"
+                            PORT="${pair##*:}"
+                            kubectl port-forward "svc/helep-${SVC}" \
+                                "${PORT}:${PORT}" -n helep &
+                            sleep 2
+                            CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+                                    "http://localhost:${PORT}/healthz")
+                            kill %1 2>/dev/null || true
+                            [ "$CODE" = "200" ] || \
+                                { echo "helep-${SVC} /healthz returned $CODE"; exit 1; }
+                            echo "helep-${SVC} ok"
+                        done
+
+                        # quick end-to-end saga: signup -> SOS -> check analytics
+                        kubectl port-forward svc/helep-user-service 8001:8001 -n helep &
+                        kubectl port-forward svc/helep-sos-service 8002:8002 -n helep &
+                        kubectl port-forward svc/helep-analytics-service 8005:8005 -n helep &
+                        sleep 3
+
+                        TOKEN=$(curl -sf -X POST http://localhost:8001/signup \
+                            -H "content-type: application/json" \
+                            -d \'{"phone":"+2376000001","password":"ci-pass","role":"citizen"}\' \
+                            | python3 -c "import sys,json; print(json.load(sys.stdin)[\'token\'])")
+
+                        curl -sf -X POST http://localhost:8002/sos \
+                            -H "authorization: Bearer $TOKEN" \
+                            -H "content-type: application/json" \
+                            -d \'{"lat":4.0500,"lon":9.7700,"mode":"online"}\'
+
+                        sleep 3
+                        curl -sf http://localhost:8005/stats/events
+                        kill %1 %2 %3 2>/dev/null || true
+                        echo "saga smoke test passed"
+                    '''
+                }
+            }
+        }
+
+        stage('Promote to Production?') {
+            steps {
+                input message: "Deploy ${SHORT_SHA} to production?",
+                      ok: "Yes, deploy",
+                      submitter: "lead-dev,ops"
+            }
+        }
+
+        stage('Production Deploy') {
+            steps {
+                withKubeConfig([credentialsId: 'kubeconfig-production']) {
+                    sh """
+                        helm upgrade --install helep ./charts/helep \\
+                            -n ${NAMESPACE} --create-namespace \\
+                            --set global.tag=${SHORT_SHA} \\
+                            --set global.registry=${IMAGE_BASE} \\
+                            --set global.jwtSecret=${JWT_SECRET_VAL} \\
+                            --set global.kafkaAddr=${KAFKA_ADDR} \\
+                            --atomic --timeout 8m --wait
+                        echo "production deploy done"
+                    """
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            sh '''
+                for svc in user-service sos-service dispatch-service \
+                            notification-service analytics-service; do
+                    docker rmi "${IMAGE_BASE}-${svc}:${SHORT_SHA}" 2>/dev/null || true
+                done
+            '''
+        }
+        success { echo "Pipeline finished successfully -- ${SHORT_SHA} is live" }
+        failure { echo "Pipeline failed -- check the stage above for details" }
+    }
+}

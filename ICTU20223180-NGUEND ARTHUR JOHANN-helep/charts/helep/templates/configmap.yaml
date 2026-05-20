@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: helep-env
+  namespace: {{ .Release.Namespace }}
+data:
+  KAFKA_BOOTSTRAP: {{ .Values.global.kafkaAddr | quote }}
+  MATCHER: {{ .Values.dispatchSvc.matcher | quote }}

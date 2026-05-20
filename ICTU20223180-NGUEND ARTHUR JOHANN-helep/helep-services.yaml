@@ -1,0 +1,295 @@
+---
+# HELEP Kubernetes Deployments
+# Deploy all 5 microservices to the helep namespace
+
+---
+# User Service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: user-service
+  namespace: helep
+  labels:
+    app: user-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: user-service
+  template:
+    metadata:
+      labels:
+        app: user-service
+    spec:
+      containers:
+      - name: user-service
+        image: docker.io/helep/user-service:latest
+        ports:
+        - containerPort: 8001
+        env:
+        - name: KAFKA_BOOTSTRAP
+          value: "kafka-bootstrap.kafka.svc.cluster.local:9092"
+        - name: DB_PATH
+          value: "/data/user.db"
+        - name: JWT_SECRET
+          value: "demo-secret-key"
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "80m"
+          limits:
+            memory: "256Mi"
+            cpu: "400m"
+        volumeMounts:
+        - name: data
+          mountPath: /data
+      volumes:
+      - name: data
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: user-service
+  namespace: helep
+spec:
+  selector:
+    app: user-service
+  ports:
+  - port: 8001
+    targetPort: 8001
+  type: ClusterIP
+
+---
+# SOS Service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sos-service
+  namespace: helep
+  labels:
+    app: sos-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sos-service
+  template:
+    metadata:
+      labels:
+        app: sos-service
+    spec:
+      containers:
+      - name: sos-service
+        image: docker.io/helep/sos-service:latest
+        ports:
+        - containerPort: 8002
+        env:
+        - name: KAFKA_BOOTSTRAP
+          value: "kafka-bootstrap.kafka.svc.cluster.local:9092"
+        - name: DB_PATH
+          value: "/data/sos.db"
+        - name: JWT_SECRET
+          value: "demo-secret-key"
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "80m"
+          limits:
+            memory: "256Mi"
+            cpu: "400m"
+        volumeMounts:
+        - name: data
+          mountPath: /data
+      volumes:
+      - name: data
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sos-service
+  namespace: helep
+spec:
+  selector:
+    app: sos-service
+  ports:
+  - port: 8002
+    targetPort: 8002
+  type: ClusterIP
+
+---
+# Dispatch Service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dispatch-service
+  namespace: helep
+  labels:
+    app: dispatch-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dispatch-service
+  template:
+    metadata:
+      labels:
+        app: dispatch-service
+    spec:
+      containers:
+      - name: dispatch-service
+        image: docker.io/helep/dispatch-service:latest
+        ports:
+        - containerPort: 8003
+        env:
+        - name: KAFKA_BOOTSTRAP
+          value: "kafka-bootstrap.kafka.svc.cluster.local:9092"
+        - name: DB_PATH
+          value: "/data/dispatch.db"
+        - name: JWT_SECRET
+          value: "demo-secret-key"
+        - name: MATCHER
+          value: "nearest"
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "80m"
+          limits:
+            memory: "256Mi"
+            cpu: "600m"
+        volumeMounts:
+        - name: data
+          mountPath: /data
+      volumes:
+      - name: data
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dispatch-service
+  namespace: helep
+spec:
+  selector:
+    app: dispatch-service
+  ports:
+  - port: 8003
+    targetPort: 8003
+  type: ClusterIP
+
+---
+# Notification Service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notification-service
+  namespace: helep
+  labels:
+    app: notification-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: notification-service
+  template:
+    metadata:
+      labels:
+        app: notification-service
+    spec:
+      containers:
+      - name: notification-service
+        image: docker.io/helep/notification-service:latest
+        ports:
+        - containerPort: 8004
+        env:
+        - name: KAFKA_BOOTSTRAP
+          value: "kafka-bootstrap.kafka.svc.cluster.local:9092"
+        - name: DB_PATH
+          value: "/data/notification.db"
+        - name: JWT_SECRET
+          value: "demo-secret-key"
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "80m"
+          limits:
+            memory: "256Mi"
+            cpu: "400m"
+        volumeMounts:
+        - name: data
+          mountPath: /data
+      volumes:
+      - name: data
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: notification-service
+  namespace: helep
+spec:
+  selector:
+    app: notification-service
+  ports:
+  - port: 8004
+    targetPort: 8004
+  type: ClusterIP
+
+---
+# Analytics Service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: analytics-service
+  namespace: helep
+  labels:
+    app: analytics-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: analytics-service
+  template:
+    metadata:
+      labels:
+        app: analytics-service
+    spec:
+      containers:
+      - name: analytics-service
+        image: docker.io/helep/analytics-service:latest
+        ports:
+        - containerPort: 8005
+        env:
+        - name: KAFKA_BOOTSTRAP
+          value: "kafka-bootstrap.kafka.svc.cluster.local:9092"
+        - name: DB_PATH
+          value: "/data/analytics.db"
+        - name: JWT_SECRET
+          value: "demo-secret-key"
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "80m"
+          limits:
+            memory: "256Mi"
+            cpu: "400m"
+        volumeMounts:
+        - name: data
+          mountPath: /data
+      volumes:
+      - name: data
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: analytics-service
+  namespace: helep
+spec:
+  selector:
+    app: analytics-service
+  ports:
+  - port: 8005
+    targetPort: 8005
+  type: ClusterIP

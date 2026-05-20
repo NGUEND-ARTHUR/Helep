@@ -1,0 +1,76 @@
+{
+  "title": "HELEP Platform Overview",
+  "uid": "helep-main",
+  "description": "Live view of all five services — SOS rates, dispatch, notifications and analytics.",
+  "tags": ["helep", "emergency"],
+  "refresh": "10s",
+  "time": { "from": "now-30m", "to": "now" },
+  "schemaVersion": 38,
+  "panels": [
+    {
+      "id": 1, "type": "stat", "title": "SOS Triggers (total)",
+      "gridPos": { "x": 0, "y": 0, "w": 5, "h": 4 },
+      "targets": [{ "expr": "sum(helep_sos_triggers_total)", "refId": "A" }],
+      "options": { "colorMode": "background", "graphMode": "area" }
+    },
+    {
+      "id": 2, "type": "stat", "title": "Cancellations (total)",
+      "gridPos": { "x": 5, "y": 0, "w": 5, "h": 4 },
+      "targets": [{ "expr": "sum(helep_sos_cancels_total)", "refId": "A" }],
+      "options": { "colorMode": "background" }
+    },
+    {
+      "id": 3, "type": "stat", "title": "Dispatches (total)",
+      "gridPos": { "x": 10, "y": 0, "w": 5, "h": 4 },
+      "targets": [{ "expr": "sum(helep_dispatch_assigned_total)", "refId": "A" }],
+      "options": { "colorMode": "background" }
+    },
+    {
+      "id": 4, "type": "stat", "title": "Zone Alerts (total)",
+      "gridPos": { "x": 15, "y": 0, "w": 4, "h": 4 },
+      "targets": [{ "expr": "sum(helep_dispatch_zone_hits_total)", "refId": "A" }],
+      "options": { "colorMode": "background" }
+    },
+    {
+      "id": 5, "type": "timeseries",
+      "title": "SOS trigger rate by mode (online / offline)",
+      "description": "Shows how fast incidents are being created and through which channel.",
+      "gridPos": { "x": 0, "y": 4, "w": 12, "h": 8 },
+      "targets": [{
+        "expr": "sum by (mode)(rate(helep_sos_triggers_total[1m]))",
+        "legendFormat": "{{mode}}", "refId": "A"
+      }],
+      "fieldConfig": { "defaults": { "unit": "reqps" } }
+    },
+    {
+      "id": 6, "type": "timeseries",
+      "title": "Notifications delivered per template",
+      "description": "Breakdown by channel and template so we can spot delivery failures.",
+      "gridPos": { "x": 12, "y": 4, "w": 12, "h": 8 },
+      "targets": [{
+        "expr": "sum by (channel, template)(rate(helep_notifications_sent_total[1m]))",
+        "legendFormat": "{{channel}}/{{template}}", "refId": "A"
+      }],
+      "fieldConfig": { "defaults": { "unit": "reqps" } }
+    },
+    {
+      "id": 7, "type": "timeseries",
+      "title": "Dispatch assignment rate (proxy for end-to-end latency)",
+      "description": "A non-zero rate means the saga pipeline is running. Gaps mean Kafka lag or a crashed dispatch-service.",
+      "gridPos": { "x": 0, "y": 12, "w": 12, "h": 8 },
+      "targets": [{
+        "expr": "rate(helep_dispatch_assigned_total[1m])",
+        "legendFormat": "assignments/s", "refId": "A"
+      }]
+    },
+    {
+      "id": 8, "type": "timeseries",
+      "title": "Analytics events consumed per stream",
+      "gridPos": { "x": 12, "y": 12, "w": 12, "h": 8 },
+      "targets": [{
+        "expr": "sum by (stream)(rate(helep_analytics_events_total[1m]))",
+        "legendFormat": "{{stream}}", "refId": "A"
+      }]
+    }
+  ]
+}

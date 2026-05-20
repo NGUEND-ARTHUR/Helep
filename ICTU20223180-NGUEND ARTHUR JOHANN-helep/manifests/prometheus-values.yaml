@@ -1,0 +1,56 @@
+# Install:
+#   kubectl create namespace observability
+#   helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+#   helm upgrade --install prom-stack prometheus-community/kube-prometheus-stack \
+#       -n observability -f manifests/prometheus-values.yaml
+
+prometheus:
+  prometheusSpec:
+    # pick up ServiceMonitors and PodMonitors from any namespace
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    retention: 7d
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 10Gi
+    # scrape helep pods that have prometheus.io/scrape=true annotation
+    additionalScrapeConfigs:
+      - job_name: helep-pods
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces:
+              names: [helep]
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+            action: keep
+            regex: "true"
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_port]
+            action: replace
+            target_label: __address__
+            regex: "([^:]+)(?::\\d+)?;(\\d+)"
+            replacement: "$1:$2"
+            source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+          - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name]
+            target_label: service
+
+grafana:
+  adminPassword: "helep-grafana-2024"
+  sidecar:
+    dashboards:
+      enabled: true
+      searchNamespace: observability
+  dashboardProviders:
+    dashboardproviders.yaml:
+      apiVersion: 1
+      providers:
+        - name: helep
+          folder: HELEP
+          type: file
+          options:
+            path: /var/lib/grafana/dashboards/helep
+  dashboardsConfigMaps:
+    helep: helep-dashboard-cm

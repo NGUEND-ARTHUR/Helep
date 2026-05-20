@@ -1,0 +1,61 @@
+# Apply after installing the Strimzi operator:
+#   kubectl create namespace kafka
+#   helm install strimzi oci://quay.io/strimzi-helm/strimzi-kafka-operator \
+#       -n kafka --set watchNamespaces="{kafka}"
+#
+# 1 broker is enough for this demo. In production use 3 replicas and raise
+# min.insync.replicas to 2.
+apiVersion: kafka.strimzi.io/v1beta2
+kind: Kafka
+metadata:
+  name: helep-kafka
+  namespace: kafka
+spec:
+  kafka:
+    version: 3.7.0
+    replicas: 1
+    listeners:
+      - name: plain
+        port: 9092
+        type: internal
+        tls: false
+      - name: tls
+        port: 9093
+        type: internal
+        tls: true
+    config:
+      # topics must be created via CRDs -- no auto-create
+      auto.create.topics.enable: "false"
+      log.retention.hours: 24
+      log.retention.bytes: "1073741824"
+      default.replication.factor: 1
+      min.insync.replicas: 1
+      offsets.topic.replication.factor: 1
+      transaction.state.log.replication.factor: 1
+      transaction.state.log.min.isr: 1
+    storage:
+      type: persistent-claim
+      size: 10Gi
+      class: standard
+    resources:
+      requests: { cpu: "500m", memory: "1Gi" }
+      limits:   { cpu: "2",    memory: "2Gi" }
+  zookeeper:
+    replicas: 0
+    storage: { type: ephemeral }
+  entityOperator:
+    topicOperator: {}
+    userOperator: {}
+---
+# Keep at least 1 broker up during node drains
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: helep-kafka-pdb
+  namespace: kafka
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      strimzi.io/cluster: helep-kafka
+      strimzi.io/name: helep-kafka-kafka
